@@ -1,8 +1,8 @@
-#include <unistd.h>
+#include <memory.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <memory.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 #define BUFFSIZE 2048
 
@@ -164,10 +164,7 @@ int main(int argc, const char* argv[]) {
  * Mapping function for Mappers to execute their programs and
  * handle pipe communications between parent and reducer pipes gracefully.
  */
-void map(char * mapFunc, int * parentPipe, int * reducerPipe) {
-
-    char dir[BUFFSIZE] ="samples/src/";
-    strncat(dir, mapFunc, BUFFSIZE);
+void map(char * mapProg, int * parentPipe, int * reducerPipe) {
 
     if (reducerPipe[0] == -1) {
         /* Execute a Map Model */
@@ -175,7 +172,7 @@ void map(char * mapFunc, int * parentPipe, int * reducerPipe) {
         dup2(parentPipe[0],0);
         close(parentPipe[1]);
         close(parentPipe[0]);
-        execl(dir, (char *) 0);
+        execl(mapProg, (char *) 0);
     }
     else {
         /* Execute a MapReduce Model */
@@ -186,7 +183,7 @@ void map(char * mapFunc, int * parentPipe, int * reducerPipe) {
         dup2(reducerPipe[1],1);
         close(reducerPipe[1]);
         close(reducerPipe[0]);
-        execl(dir, (char *) 0);
+        execl(mapProg, (char *) 0);
     }
 }
 
@@ -194,10 +191,7 @@ void map(char * mapFunc, int * parentPipe, int * reducerPipe) {
  * Reducing function for Mappers to execute their programs and
  * handle pipe communications between mapper and reducer pipes gracefully.
  */
-void reduce(char * reduceFunc, int * mapperPipe, int * upReducerPipe, int * downReducerPipe) {
-
-    char dir[BUFFSIZE] ="samples/src/";
-    strncat(dir, reduceFunc, BUFFSIZE);
+void reduce(char * reduceProg, int * mapperPipe, int * upReducerPipe, int * downReducerPipe) {
 
     dup2(mapperPipe[0],0);
     close(mapperPipe[1]);
@@ -205,7 +199,7 @@ void reduce(char * reduceFunc, int * mapperPipe, int * upReducerPipe, int * down
 
     if ((upReducerPipe[0] == -1) && (downReducerPipe[0] == -1)) {
         // Only 1 Reducer exists
-        execl(dir, (char *) 0);
+        execl(reduceProg, (char *) 0);
     }
     else {
         if (upReducerPipe[0] == -1) {
@@ -213,14 +207,14 @@ void reduce(char * reduceFunc, int * mapperPipe, int * upReducerPipe, int * down
             dup2(downReducerPipe[1],1);
             close(downReducerPipe[1]);
             close(downReducerPipe[0]);
-            execl(dir, (char *) 0);
+            execl(reduceProg, (char *) 0);
         }
         else if (downReducerPipe[0] == -1) {
             // Last Reducer has no pipes to its below
             dup2(upReducerPipe[0],2);
             close(upReducerPipe[1]);
             close(upReducerPipe[0]);
-            execl(dir, (char *) 0);
+            execl(reduceProg, (char *) 0);
         }
         else {
             // A Normal mid Reducer
@@ -230,7 +224,7 @@ void reduce(char * reduceFunc, int * mapperPipe, int * upReducerPipe, int * down
             dup2(downReducerPipe[1],1);
             close(downReducerPipe[1]);
             close(downReducerPipe[0]);
-            execl(dir, (char *) 0);
+            execl(reduceProg, (char *) 0);
         }
     }
 }
