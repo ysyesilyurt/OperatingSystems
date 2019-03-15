@@ -1,7 +1,8 @@
-.PHONY: MapReduce
+CC = gcc
 
-all: MapReduce
+all: clean MapReduce
 
 MapReduce: mapreduce.c
-		@gcc mapreduce.c -o mapreduce -w
-
+		$(CC) mapreduce.c -o mapreduce -w
+clean:
+		rm -f mapreduce
