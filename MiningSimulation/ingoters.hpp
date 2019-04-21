@@ -1,12 +1,14 @@
 #ifndef _OS_2019_INGOTERS_HPP
 #define _OS_2019_INGOTERS_HPP
 
+#include "monitor.hpp"
+
 class Smelter: public Monitor {
     int sID;
     int ingotCount;
     unsigned int sPeriod;
     unsigned int capacity;
-    unsigned int oreType;
+    OreType oreType;
     bool quit;
 
     Condition cv;
@@ -14,7 +16,7 @@ class Smelter: public Monitor {
 
 public:
 
-    Smelter(int sID, unsigned int sP, unsigned int cap, unsigned int oT) : cv(this) {
+    Smelter(int sID, unsigned int sP, unsigned int cap, OreType oT) : cv(this) {
         this->sID = sID;
         sPeriod = sP;
         capacity = cap;
@@ -80,7 +82,7 @@ public:
         return sID;
     }
 
-    unsigned int getOreType() {
+    OreType getOreType() {
         __synchronized__;
         return oreType;
     }

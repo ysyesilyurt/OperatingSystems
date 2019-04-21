@@ -9,7 +9,7 @@ class Miner: public Monitor {
     unsigned int minerPeriod;
     unsigned int capacity;
     unsigned int totalAmount;
-    unsigned int oreType;
+    OreType oreType;
     bool quit;
 
     Condition cv;
@@ -17,7 +17,7 @@ class Miner: public Monitor {
 
 public:
 
-    Miner(int mID, unsigned int mP, unsigned int cap, unsigned int oT, unsigned int tA) : cv(this) {
+    Miner(int mID, unsigned int mP, unsigned int cap, OreType oT, unsigned int tA) : cv(this) {
         oreCount = 0;
         minerID = mID;
         minerPeriod = mP;
@@ -88,7 +88,7 @@ public:
         return oreCount;
     }
 
-    unsigned int getOreType() {
+    OreType getOreType() {
         __synchronized__;
         return oreType;
     }
