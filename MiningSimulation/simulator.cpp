@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <unistd.h>
 #include "monitor.hpp"
 #include "miner.hpp"
@@ -13,14 +14,31 @@ void *sTimer(void *);
 void *fTimer(void *);
 
 /* global variables */
-// maybe mutex for these
+
+pthread_mutex_t minerMut =  PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t iSmelterMut =  PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cSmelterMut =  PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t foundryMut =  PTHREAD_MUTEX_INITIALIZER;
+
 std::vector<Miner> miners;
 std::vector<Transporter> transporters;
 std::vector<Smelter> ironSmelters;
 std::vector<Smelter> copperSmelters;
 std::vector<Foundry> foundries;
 
+pthread_mutex_t oreAvailMut =  PTHREAD_MUTEX_INITIALIZER;
+bool oreNotAvailable = false;
+
+pthread_mutex_t transCond_lock =  PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t transCond = PTHREAD_COND_INITIALIZER;
+int lastMiner = 0;
+
 /* maybe pQ + its mutex */
+
+struct TransParam {
+    Transporter *t;
+    int NumMiners;
+};
 
 int main(int argc, const char* argv[]) {
 
@@ -54,6 +72,7 @@ void initSimulation(pthread_t *minerThreads, pthread_t *transThreads, pthread_t 
     int period, cap, tA;
     unsigned int oT;
 
+
     std::cin >> numMines;
     minerThreads = new pthread_t[numMines];
     for (int i = 0; i < numMines; ++i) {
@@ -64,12 +83,15 @@ void initSimulation(pthread_t *minerThreads, pthread_t *transThreads, pthread_t 
     }
 
     std::cin >> numTrans;
+    TransParam *tparams = new TransParam[numTrans] ;
     transThreads = new pthread_t[numTrans];
     for (int i = 0; i < numTrans; ++i) {
         std::cin >> period;
         Transporter transporter = Transporter(i, period);
         transporters.emplace_back(transporter);
-        pthread_create(&transThreads[i], NULL, TransporterMain, (void *) &transporter);
+        tparams[i].t = &transporter;
+        tparams[i].NumMiners = numMines;
+        pthread_create(&transThreads[i], NULL, TransporterMain, (void *) (tparams + i));
     }
 
     std::cin >> numSmelters;
@@ -121,6 +143,14 @@ void *MinerMain(void *p) {
             WriteOutput(&minerInfo, NULL, NULL, NULL, MINER_STARTED);
             usleep(mPeriod);
             miner->mineOre();
+
+            pthread_mutex_lock (&oreAvailMut);
+            oreNotAvailable = false;
+            pthread_mutex_unlock (&oreAvailMut);
+            pthread_mutex_lock (&transCond_lock);
+            pthread_cond_signal (&transCond);
+            pthread_mutex_unlock (&transCond_lock);
+
             FillMinerInfo(&minerInfo, miner->getMinerId(), miner->getOreType(), miner->getCapacity(), miner->getCurrOreCount());
             WriteOutput(&minerInfo, NULL, NULL, NULL, MINER_FINISHED);
             usleep(mPeriod);
@@ -129,100 +159,67 @@ void *MinerMain(void *p) {
 }
 
 void *TransporterMain(void *p) {
-    Transporter *transporter = (Transporter *) p;
-    bool interiorFlag, exitFlag = false;
-    int exitCount = 0;
+    TransParam *tp = (TransParam *) p;
+    Transporter *transporter = tp->t;
+    int numMiners = tp->NumMiners;
+    bool interiorFlag, gotOre;
+    int exitCount = 0, minerCount, index;
     double transPeriod = transporter->getPeriod() - (transporter->getPeriod()*0.01) + (rand()%(int)(transporter->getPeriod()*0.02));
+
     TransporterInfo transporterInfo;
     FillTransporterInfo(&transporterInfo, transporter->getTransporterId(), transporter->getOre());
     WriteOutput(NULL, &transporterInfo, NULL, NULL, TRANSPORTER_CREATED);
-    while (true) {
-        if (exitFlag)
-            break;
-        for (int i = 0; i < miners.size(); ++i) {
-            if (!miners[i].isEmpty()) {
-                // load an ore
-                miners[i].removeOre();
-                miners[i].notify(); // TODO
-                transporter->loadOre(OreType(miners[i].getOreType()));
-                usleep(transPeriod);
-                // travel
-                usleep(transPeriod);
-                // unload it
-                interiorFlag = false;
-                if (*(transporter->getOre()) == 0) {
-                    // Iron
-                    while (true) {
-                        for (int j = 0; j < foundries.size(); ++j) {
-                            if (!foundries[j].checkQuit() and !foundries[j].isFullIron()) {
-                                foundries[j].receiveIron();
-                                foundries[j].notify();
-                                transporter->unloadOre();
-                                usleep(transPeriod);
-                                interiorFlag = true;
-                                break;
-                            }
-                        }
-                        for (int j = 0; j < ironSmelters.size(); ++j) {
-                            if (!ironSmelters[j].checkQuit() and !ironSmelters[j].isFull()) {
-                                ironSmelters[j].receiveOre();
-                                ironSmelters[j].notify();
-                                transporter->unloadOre();
-                                usleep(transPeriod);
-                                interiorFlag = true;
-                                break;
-                            }
-                        }
-                        if (interiorFlag)
-                            break;
-                    }
-                }
-                else if (*(transporter->getOre()) == 1) {
-                    // Copper
-                    while (true) {
-                        for (int j = 0; j < copperSmelters.size(); ++j) {
-                            if (!copperSmelters[j].checkQuit() and !copperSmelters[j].isFull()) {
-                                copperSmelters[j].receiveOre();
-                                copperSmelters[j].notify();
-                                transporter->unloadOre();
-                                usleep(transPeriod);
-                                interiorFlag = true;
-                                break;
-                            }
-                        }
-                        if (interiorFlag)
-                            break;
-                    }
-                }
-                else if (*(transporter->getOre()) == 2) {
-                    // Coal
-                    while (true) {
-                        for (int j = 0; j < foundries.size(); ++j) {
-                            if (!foundries[j].checkQuit() and !foundries[j].isFullCoal()) {
-                                foundries[j].receiveCoal();
-                                foundries[j].notify();
-                                transporter->unloadOre();
-                                usleep(transPeriod);
-                                interiorFlag = true;
-                                break;
-                            }
-                        }
-                        if (interiorFlag)
-                            break;
-                    }
-                }
-                // travel back to miners
-                usleep(transPeriod);
-            }
-            else if (miners[i].checkQuit())
-                exitCount++;
 
-            if (exitCount == miners.size()) {
-                // Quit
-                exitFlag = true;
-                ///// TODO
+    while (exitCount != numMiners) {
+        pthread_mutex_lock (&minerMut);
+        gotOre = false;
+        minerCount = 0;
+        index = lastMiner;
+        while (minerCount <= numMiners) {
+            /* Transporter thread miner routine */
+            if (index == numMiners)
+                index = 0;
+            if (!miners[index].isEmpty()) {
+                lastMiner = index + 1;
+                MinerInfo minerInfo;
+                TransporterInfo transporterinfo;
+                FillMinerInfo(&minerInfo, miners[index].getMinerId(), (OreType) 0,0,0);
+                FillTransporterInfo(&transporterinfo, transporter->getTransporterId(), transporter->getOre());
+                WriteOutput(&minerInfo, &transporterinfo, NULL, NULL, TRANSPORTER_TRAVEL);
+                usleep(transPeriod);
+
+                // load an ore
+                miners[index].removeOre();
+                transporter->loadOre(OreType(miners[index].getOreType()));
+                FillMinerInfo(&minerInfo, miners[index].getMinerId(), miners[index].getOreType(), miners[index].getCapacity(), miners[index].getCurrOreCount());
+                FillTransporterInfo(&transporterinfo, transporter->getTransporterId(), transporter->getOre());
+                WriteOutput(&minerInfo, &transporterinfo, NULL, NULL, TRANSPORTER_TAKE_ORE);
+                usleep(transPeriod);
+                miners[index].notify();
+                gotOre = true;
                 break;
             }
+            else if (miners[index].checkQuit())
+                exitCount++;
+
+            minerCount++;
+            index++;
+        }
+        pthread_mutex_unlock (&minerMut);
+
+        if (gotOre) {
+            // TODO: Implement Transporter producers Main routines!!
+        }
+        else {
+            pthread_mutex_lock (&oreAvailMut);
+            oreNotAvailable = true;
+            pthread_mutex_lock (&transCond_lock);
+            // While oreNotAvailable -- wait
+            while (oreNotAvailable)
+                pthread_cond_wait (&transCond, &transCond_lock);
+            pthread_mutex_unlock (&transCond_lock);
+            oreNotAvailable = true;
+            pthread_mutex_unlock (&oreAvailMut);
         }
     }
     FillTransporterInfo(&transporterInfo, transporter->getTransporterId(), transporter->getOre());
