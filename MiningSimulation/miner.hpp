@@ -13,7 +13,7 @@ class Miner: public Monitor {
     bool quit;
 
     Condition cv;
-    std::vector<OreType> storage;
+    std::vector<Ore> storage;
 
 public:
 
@@ -29,7 +29,9 @@ public:
 
     void mineOre() {
         __synchronized__;
-        storage.emplace_back(oreType);
+        Ore ore;
+        ore.type = oreType;
+        storage.emplace_back(ore);
         oreCount++;
     }
 

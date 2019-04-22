@@ -10,9 +10,12 @@ class Smelter: public Monitor {
     unsigned int capacity;
     OreType oreType;
     bool quit;
+    bool timeout;
+    int pushedTimerCount;
 
     Condition cv;
-    std::vector<OreType> storage;
+    std::vector<Ore> storage;
+    std::vector<bool> timers;
 
 public:
 
@@ -23,6 +26,8 @@ public:
         oreType = oT;
         ingotCount = 0;
         quit = false;
+        timeout = false;
+        pushedTimerCount = 0;
     }
 
     void produceIngot() {
@@ -34,7 +39,9 @@ public:
 
     void receiveOre() {
         __synchronized__;
-        storage.emplace_back(oreType);
+        Ore ore;
+        ore.type = oreType;
+        storage.emplace_back(ore);
     }
 
     void wait() {
@@ -102,7 +109,32 @@ public:
         return storage.size();
     }
 
-    bool timerStop = false;
+    void SetTimeout() {
+        __synchronized__;
+        timeout = true;
+    }
+
+    void ClearTimeout() {
+        __synchronized__;
+        timeout = false;
+    }
+
+    bool CheckTimeout() {
+        __synchronized__;
+        return timeout;
+    }
+
+    int addTimer() {
+        __synchronized__;
+        timers.push_back(true);
+        pushedTimerCount++;
+        return pushedTimerCount-1;
+    }
+
+    std::vector<bool> & getTimers() {
+        __synchronized__;
+        return timers;
+    }
 };
 
 class Foundry: public Monitor {
@@ -111,10 +143,13 @@ class Foundry: public Monitor {
     unsigned int fPeriod;
     unsigned int capacity;
     bool quit;
+    bool timeout;
+    int pushedTimerCount;
 
     Condition cv;
-    std::vector<OreType> ironStorage;
-    std::vector<OreType> coalStorage;
+    std::vector<Ore> ironStorage;
+    std::vector<Ore> coalStorage;
+    std::vector<bool> timers;
 
 public:
 
@@ -124,6 +159,8 @@ public:
         capacity = cap;
         ingotCount = 0;
         quit = false;
+        timeout = false;
+        pushedTimerCount = 0;
     }
 
     void produceIngot() {
@@ -135,12 +172,16 @@ public:
 
     void receiveIron() {
         __synchronized__;
-        ironStorage.emplace_back(IRON);
+        Ore ore;
+        ore.type = IRON;
+        ironStorage.emplace_back(ore);
     }
 
     void receiveCoal() {
         __synchronized__;
-        coalStorage.emplace_back(COAL);
+        Ore ore;
+        ore.type = COAL;
+        coalStorage.emplace_back(ore);
     }
 
     void wait() {
@@ -217,8 +258,32 @@ public:
         __synchronized__;
         return coalStorage.size();
     }
+    void SetTimeout() {
+        __synchronized__;
+        timeout = true;
+    }
 
-    bool timerStop = false;
+    void ClearTimeout() {
+        __synchronized__;
+        timeout = false;
+    }
+
+    bool CheckTimeout() {
+        __synchronized__;
+        return timeout;
+    }
+
+    int addTimer() {
+        __synchronized__;
+        timers.push_back(true);
+        pushedTimerCount++;
+        return pushedTimerCount;
+    }
+
+    std::vector<bool> & getTimers() {
+        __synchronized__;
+        return timers;
+    }
 };
 
 #endif /* _OS_2019_INGOTERS_HPP */

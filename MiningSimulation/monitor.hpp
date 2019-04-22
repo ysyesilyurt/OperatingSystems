@@ -4,9 +4,7 @@
 #include <iostream>
 #include <vector>
 #include <pthread.h>
-#include "source/writeOutput.c" // Change this before submission!!!
-
-#define __synchronized__ Lock mutex(this);
+#include "source/writeOutput.c" // TODO Change this before submission!!!
 
 //! A base class to help deriving monitor like classes 
 class Monitor {
@@ -32,15 +30,22 @@ public:
     public:
         Lock(Monitor *o) { // we need monitor ptr to access the mutex
             owner = o;
-            pthread_mutex_lock(&owner->mut); // lock on creation
+            pthread_mutex_lock(&(owner->mut)); // lock on creation
         }
         ~Lock() { 
-            pthread_mutex_unlock(&owner->mut); // unlock on destruct
+            pthread_mutex_unlock(&(owner->mut)); // unlock on destruct
         }
         void lock() { pthread_mutex_lock(&owner->mut);}
         void unlock() { pthread_mutex_unlock(&owner->mut);}
     };
 };
+
+#define __synchronized__ Lock mutex(this);
+
+struct Ore {
+    OreType type;
+};
+
 
 #endif /* _OS_2019_MONITOR_HPP_ */
 

@@ -6,7 +6,7 @@
 class Transporter: public Monitor {
     int tpID;
     unsigned int tpPeriod;
-    OreType * currOre;
+    Ore * currOre;
 
 public:
 
@@ -16,9 +16,9 @@ public:
         currOre = NULL;
     }
 
-    void loadOre(OreType ore) {
+    void loadOre(Ore * ore) {
         __synchronized__;
-        *currOre = ore;
+        currOre = ore;
     }
 
     void unloadOre() {
@@ -26,12 +26,12 @@ public:
         currOre = NULL;
     }
 
-    OreType* getOre() {
+    Ore* getOre() {
         __synchronized__;
         return currOre;
     }
 
-    int getPeriod() {
+    unsigned int getPeriod() {
         __synchronized__;
         return tpPeriod;
     }
