@@ -4,6 +4,8 @@
 #include <iostream>
 #include <vector>
 #include <pthread.h>
+#include <semaphore.h>
+
 #include "source/writeOutput.c" // TODO Change this before submission!!!
 
 //! A base class to help deriving monitor like classes 

@@ -1,8 +1,6 @@
 #include <algorithm>
-#include <pthread.h>
-#include <semaphore.h>
-#include <unistd.h>
 #include <queue>
+#include <unistd.h>
 
 #include "monitor.hpp"
 #include "miner.hpp"
@@ -20,12 +18,14 @@ void *fTimer(void *);
 
 pthread_mutex_t minerMut =  PTHREAD_MUTEX_INITIALIZER;
 int lastMiner = 0;
+pthread_mutex_t smelterMut =  PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t iSmelterMut =  PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cSmelterMut =  PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t foundryMut =  PTHREAD_MUTEX_INITIALIZER;
 
 std::vector<Miner*> miners;
 std::vector<Transporter*> transporters;
+std::vector<Smelter*> smelters;
 std::vector<Smelter*> ironSmelters;
 std::vector<Smelter*> copperSmelters;
 std::vector<Foundry*> foundries;
@@ -45,10 +45,6 @@ std::queue<Smelter*> prioritizedIronSmelters;
 std::queue<Smelter*> prioritizedCopperSmelters;
 std::queue<Foundry*> prioritizedFoundries;
 
-struct MinerParam {
-    Miner *m;
-    int NumMiners;
-};
 struct TransParam {
     Transporter *t;
     int NumMiners;
@@ -56,7 +52,6 @@ struct TransParam {
 struct StimerParam {
     int id;
     int timerId;
-    OreType type;
 };
 struct FtimerParam {
     int id;
@@ -72,16 +67,13 @@ int main(int argc, const char* argv[]) {
 
     std::cin >> numMines;
     if (numMines) {
-        MinerParam *mparams = new MinerParam[numMines] ;
         minerThreads = new pthread_t[numMines];
         minerExitted.insert(minerExitted.end(), numMines, false);
         for (int i = 0; i < numMines; ++i) {
             std::cin >> period >> cap >> oT >> tA;
             Miner * miner = new Miner(i+1, period, cap, (OreType) oT, tA);
             miners.emplace_back(miner);
-            mparams[i].m = miner;
-            mparams[i].NumMiners = numMines;
-            pthread_create(&minerThreads[i], NULL, MinerMain, (void *) (mparams + i));
+            pthread_create(&minerThreads[i], NULL, MinerMain, (void *) miner);
         }
     }
 
@@ -106,6 +98,7 @@ int main(int argc, const char* argv[]) {
         for (int i = 0; i < numSmelters; ++i) {
             std::cin >> period >> cap >> oT;
             Smelter * smelter = new Smelter(i+1, period, cap, (OreType) oT);
+            smelters.emplace_back(smelter);  //////// !!
             if (oT) {
                 // oT = copper
                 copperSmelters.emplace_back(smelter);
@@ -165,9 +158,7 @@ int main(int argc, const char* argv[]) {
 }
 
 void *MinerMain(void *p) {
-    MinerParam *mp = (MinerParam *) p;
-    Miner *miner = mp->m;
-    int numMiners = mp->NumMiners;
+    Miner *miner = (Miner *) p;
     double mPeriod = miner->getPeriod() - (miner->getPeriod()*0.01) + (rand()%(int)(miner->getPeriod()*0.02));
     MinerInfo minerInfo;
     FillMinerInfo(&minerInfo, miner->getMinerId(), miner->getOreType(), miner->getCapacity(), miner->getCurrOreCount());
@@ -178,13 +169,6 @@ void *MinerMain(void *p) {
             miner->setQuit();
             FillMinerInfo(&minerInfo, miner->getMinerId(), miner->getOreType(), miner->getCapacity(), miner->getCurrOreCount());
             WriteOutput(&minerInfo, NULL, NULL, NULL, MINER_STOPPED);
-            pthread_mutex_lock (&mExitMut);
-            if (std::find(minerExitted.begin(), minerExitted.end(), false) == minerExitted.end()) {
-                allMinersExitted = true;
-                // Notify sleeping transporters to make them quit
-                sem_post(&semTransMiners);
-            }
-            pthread_mutex_unlock (&mExitMut);
             break;
         }
         else {
@@ -260,6 +244,11 @@ void *TransporterMain(void *p) {
                 // Empty storage + exitted miner
                 pthread_mutex_lock (&mExitMut);
                 minerExitted[index] = true;
+                if (std::find(minerExitted.begin(), minerExitted.end(), false) == minerExitted.end()) {
+                    allMinersExitted = true;
+                    // Notify sleeping transporters to make them quit
+                    sem_post(&semTransMiners);
+                }
                 pthread_mutex_unlock (&mExitMut);
             }
             minerCount++;
@@ -516,6 +505,7 @@ void *TransporterMain(void *p) {
 
             // notify next sleeping transporter
             sem_post(&semTransMiners);
+            // sem_post(&semTransProducers);
             break;
         }
         else {
@@ -552,7 +542,6 @@ void *SmelterMain(void *p) {
             }
             // create a timer thread
             StimerParam * stp = new StimerParam;
-            stp->type = smelter->getOreType();
             stp->id = smelter->getSmelterId() - 1;
             int timerId = smelter->addTimer();
             stp->timerId = timerId;
@@ -648,22 +637,12 @@ void *FoundryMain(void *p) {
 void *sTimer(void *p) {
     StimerParam *stp = (StimerParam *) p;
     sleep(5);
-    if (stp->type == IRON) {
-        pthread_mutex_lock (&iSmelterMut);
-        if (ironSmelters[stp->id] and ironSmelters[stp->id]->getTimers()[stp->timerId]) {
-            ironSmelters[stp->id]->SetTimeout();
-            ironSmelters[stp->id]->notify();
-        }
-        pthread_mutex_unlock (&iSmelterMut);
+    pthread_mutex_lock (&smelterMut);
+    if (smelters[stp->id] and smelters[stp->id]->getTimers()[stp->timerId]) {
+        smelters[stp->id]->SetTimeout();
+        smelters[stp->id]->notify();
     }
-    else {
-        pthread_mutex_lock (&cSmelterMut);
-        if (copperSmelters[stp->id] and copperSmelters[stp->id]->getTimers()[stp->timerId]) {
-            copperSmelters[stp->id]->SetTimeout();
-            copperSmelters[stp->id]->notify();
-        }
-        pthread_mutex_unlock(&cSmelterMut);
-    }
+    pthread_mutex_unlock(&smelterMut);
     return NULL;
 }
 
