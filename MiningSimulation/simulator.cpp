@@ -65,6 +65,10 @@ int main(int argc, const char* argv[]) {
     unsigned int oT;
     pthread_t *minerThreads, *transThreads, *smeltThreads, *foundThreads;
 
+    sem_init(&semTransMiners, 0, 0);
+    sem_init(&semTransProducers, 0, 0);
+
+    InitWriteOutput();
     std::cin >> numMines;
     if (numMines) {
         minerThreads = new pthread_t[numMines];
@@ -199,9 +203,6 @@ void *TransporterMain(void *p) {
     int minerCount, index;
     double transPeriod = transporter->getPeriod() - (transporter->getPeriod()*0.01) + (rand()%(int)(transporter->getPeriod()*0.02));
 
-    sem_init(&semTransMiners, 0, 0);
-    sem_init(&semTransProducers, 0, 0);
-
     FoundryInfo foundryInfo;
     SmelterInfo smelterInfo;
     MinerInfo minerInfo;
@@ -247,7 +248,7 @@ void *TransporterMain(void *p) {
                 if (std::find(minerExitted.begin(), minerExitted.end(), false) == minerExitted.end()) {
                     allMinersExitted = true;
                     // Notify sleeping transporters to make them quit
-                    sem_post(&semTransMiners);
+                    // sem_post(&semTransMiners);
                 }
                 pthread_mutex_unlock (&mExitMut);
             }
