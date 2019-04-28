@@ -1,4 +1,6 @@
 .idea
+venv
 CMakeLists.txt
 cmake-build-debug
 cmake-build-default
+simulator
