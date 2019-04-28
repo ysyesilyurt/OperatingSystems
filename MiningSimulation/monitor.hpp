@@ -6,7 +6,7 @@
 #include <pthread.h>
 #include <semaphore.h>
 
-#include "source/writeOutput.c" // TODO Change this before submission!!!
+#include "writeOutput.c"
 
 //! A base class to help deriving monitor like classes 
 class Monitor {

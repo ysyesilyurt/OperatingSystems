@@ -277,7 +277,7 @@ public:
         __synchronized__;
         timers.push_back(true);
         pushedTimerCount++;
-        return pushedTimerCount;
+        return pushedTimerCount-1;
     }
 
     std::vector<bool> & getTimers() {

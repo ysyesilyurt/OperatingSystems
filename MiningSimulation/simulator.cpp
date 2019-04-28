@@ -35,15 +35,19 @@ std::vector<bool> minerExitted;
 bool allMinersExitted = false;
 
 sem_t semTransMiners;
-sem_t semTransProducers;
+sem_t semTransIron;
+sem_t semTransCopper;
+sem_t semTransCoal;
 
 pthread_mutex_t iSmelterPrioMut =  PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t cSmelterPrioMut =  PTHREAD_MUTEX_INITIALIZER;
-pthread_mutex_t foundryPrioMut =  PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t iFoundryPrioMut =  PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t cFoundryPrioMut =  PTHREAD_MUTEX_INITIALIZER;
 
 std::queue<Smelter*> prioritizedIronSmelters;
 std::queue<Smelter*> prioritizedCopperSmelters;
-std::queue<Foundry*> prioritizedFoundries;
+std::queue<Foundry*> ironPrioritizedFoundries;
+std::queue<Foundry*> coalPrioritizedFoundries;
 
 struct TransParam {
     Transporter *t;
@@ -66,7 +70,9 @@ int main(int argc, const char* argv[]) {
     pthread_t *minerThreads, *transThreads, *smeltThreads, *foundThreads;
 
     sem_init(&semTransMiners, 0, 0);
-    sem_init(&semTransProducers, 0, 0);
+    sem_init(&semTransIron, 0, 0);
+    sem_init(&semTransCopper, 0, 0);
+    sem_init(&semTransCoal, 0, 0);
 
     InitWriteOutput();
     std::cin >> numMines;
@@ -95,14 +101,13 @@ int main(int argc, const char* argv[]) {
         }
     }
 
-
     std::cin >> numSmelters;
     if (numSmelters) {
         smeltThreads = new pthread_t[numSmelters];
         for (int i = 0; i < numSmelters; ++i) {
             std::cin >> period >> cap >> oT;
             Smelter * smelter = new Smelter(i+1, period, cap, (OreType) oT);
-            smelters.emplace_back(smelter);  //////// !!
+            smelters.emplace_back(smelter);
             if (oT) {
                 // oT = copper
                 copperSmelters.emplace_back(smelter);
@@ -125,7 +130,8 @@ int main(int argc, const char* argv[]) {
             pthread_create(&foundThreads[i], NULL, FoundryMain, (void *) foundry);
         }
     }
-    // reap them
+
+    /* Reap Agents */
     for (int i = 0; i < numMines; i++)
         pthread_join(minerThreads[i], NULL);
 
@@ -162,14 +168,17 @@ int main(int argc, const char* argv[]) {
 }
 
 void *MinerMain(void *p) {
+    /* Miner main routine */
     Miner *miner = (Miner *) p;
     double mPeriod = miner->getPeriod() - (miner->getPeriod()*0.01) + (rand()%(int)(miner->getPeriod()*0.02));
+
     MinerInfo minerInfo;
     FillMinerInfo(&minerInfo, miner->getMinerId(), miner->getOreType(), miner->getCapacity(), miner->getCurrOreCount());
     WriteOutput(&minerInfo, NULL, NULL, NULL, MINER_CREATED);
+
     while (true) {
         if (miner->checkQuit()) {
-            // Quit
+            /* Maximum Ore Count reached, Quit. */
             miner->setQuit();
             FillMinerInfo(&minerInfo, miner->getMinerId(), miner->getOreType(), miner->getCapacity(), miner->getCurrOreCount());
             WriteOutput(&minerInfo, NULL, NULL, NULL, MINER_STOPPED);
@@ -179,7 +188,7 @@ void *MinerMain(void *p) {
             while (miner->isFull())
                 miner->wait();
 
-            // ProduceOre
+            /* ProduceOre */
             FillMinerInfo(&minerInfo, miner->getMinerId(), miner->getOreType(), miner->getCapacity(), miner->getCurrOreCount());
             WriteOutput(&minerInfo, NULL, NULL, NULL, MINER_STARTED);
             usleep(mPeriod);
@@ -196,6 +205,7 @@ void *MinerMain(void *p) {
 }
 
 void *TransporterMain(void *p) {
+    /* Transporter main routine */
     TransParam *tp = (TransParam *) p;
     Transporter *transporter = tp->t;
     int numMiners = tp->NumMiners;
@@ -216,15 +226,15 @@ void *TransporterMain(void *p) {
         minerCount = 0;
         index = lastMiner;
         while (minerCount <= numMiners) {
-            /* Transporter thread miner routine */
+            /* Transporter thread Miner routine */
+
             if (index == numMiners)
                 index = 0;
             if (!miners[index]->isEmpty()) {
                 lastMiner = index + 1;
-                TransporterInfo transporterinfo;
-                FillMinerInfo(&minerInfo, miners[index]->getMinerId(), (OreType) 0,0,0); // 0 0 0 ?
-                FillTransporterInfo(&transporterinfo, transporter->getTransporterId(), &(transporter->getOre()->type));
-                WriteOutput(&minerInfo, &transporterinfo, NULL, NULL, TRANSPORTER_TRAVEL);
+                FillMinerInfo(&minerInfo, miners[index]->getMinerId(), (OreType) 0,0,0);
+                FillTransporterInfo(&transporterInfo, transporter->getTransporterId(), &(transporter->getOre()->type));
+                WriteOutput(&minerInfo, &transporterInfo, NULL, NULL, TRANSPORTER_TRAVEL);
                 usleep(transPeriod);
 
                 // load an ore
@@ -234,22 +244,19 @@ void *TransporterMain(void *p) {
                 transporter->loadOre(&ore);
                 FillMinerInfo(&minerInfo, miners[index]->getMinerId(), miners[index]->getOreType(),
                               miners[index]->getCapacity(), miners[index]->getCurrOreCount());
-                FillTransporterInfo(&transporterinfo, transporter->getTransporterId(), &(transporter->getOre()->type));
-                WriteOutput(&minerInfo, &transporterinfo, NULL, NULL, TRANSPORTER_TAKE_ORE);
+                FillTransporterInfo(&transporterInfo, transporter->getTransporterId(), &(transporter->getOre()->type));
+                WriteOutput(&minerInfo, &transporterInfo, NULL, NULL, TRANSPORTER_TAKE_ORE);
                 usleep(transPeriod);
                 miners[index]->notify();
                 gotOre = true;
                 break;
             }
             else if (miners[index]->checkQuit()) {
-                // Empty storage + exitted miner
+                /* If Empty Storage in Miner + its agent exitted, mark this one as Exitted */
                 pthread_mutex_lock (&mExitMut);
                 minerExitted[index] = true;
-                if (std::find(minerExitted.begin(), minerExitted.end(), false) == minerExitted.end()) {
+                if (std::find(minerExitted.begin(), minerExitted.end(), false) == minerExitted.end())
                     allMinersExitted = true;
-                    // Notify sleeping transporters to make them quit
-                    // sem_post(&semTransMiners);
-                }
                 pthread_mutex_unlock (&mExitMut);
             }
             minerCount++;
@@ -259,25 +266,30 @@ void *TransporterMain(void *p) {
 
         pthread_mutex_lock (&mExitMut);
         if (gotOre) {
+            /* Transporter thread Producer routine */
+
             unloadedOre = false;
             pthread_mutex_unlock (&mExitMut);
             while (true) {
                 if (transporter->getOre()->type == 0) {
-                    // IRON
+                    /* IRON */
 
-                    /* First Check Prioritized Producers */
-                    pthread_mutex_lock(&foundryPrioMut);
-                    if (!prioritizedFoundries.empty()) {
-                        Foundry * prioFoundry = prioritizedFoundries.front();
-                        prioritizedFoundries.pop();
-                        pthread_mutex_unlock(&foundryPrioMut);
+                    /* First Check Prioritized Iron Producers */
+
+                    pthread_mutex_lock(&iFoundryPrioMut);
+                    if (!ironPrioritizedFoundries.empty()) {
+                        Foundry * prioFoundry = ironPrioritizedFoundries.front();
+                        ironPrioritizedFoundries.pop();
+                        pthread_mutex_unlock(&iFoundryPrioMut);
+
                         // travel
-                        FillFoundryInfo(&foundryInfo, prioFoundry->getFoundryId(), 0, 0, 0, 0); // 0000?
+                        FillFoundryInfo(&foundryInfo, prioFoundry->getFoundryId(), 0, 0, 0, 0);
                         FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                             &(transporter->getOre()->type));
                         WriteOutput(NULL, &transporterInfo, NULL, &foundryInfo, TRANSPORTER_TRAVEL);
                         usleep(transPeriod);
-                        // unload it
+
+                        // unload ore
                         FillFoundryInfo(&foundryInfo, prioFoundry->getFoundryId(), prioFoundry->getCapacity(),
                                         prioFoundry->getWaitingIronCount(), prioFoundry->getWaitingCoalCount(),
                                         prioFoundry->getIngotCount());
@@ -290,20 +302,22 @@ void *TransporterMain(void *p) {
                         prioFoundry->notify();
                         break;
                     }
-                    pthread_mutex_unlock(&foundryPrioMut);
+                    pthread_mutex_unlock(&iFoundryPrioMut);
 
                     pthread_mutex_lock(&iSmelterPrioMut);
                     if (!prioritizedIronSmelters.empty()) {
                         Smelter * prioSmelter = prioritizedIronSmelters.front();
                         prioritizedIronSmelters.pop();
                         pthread_mutex_unlock(&iSmelterPrioMut);
+
                         // travel
-                        FillSmelterInfo(&smelterInfo, prioSmelter->getSmelterId(), (OreType) 0, 0, 0, 0); // 000?
+                        FillSmelterInfo(&smelterInfo, prioSmelter->getSmelterId(), (OreType) 0, 0, 0, 0);
                         FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                             &(transporter->getOre()->type));
                         WriteOutput(NULL, &transporterInfo, &smelterInfo, NULL, TRANSPORTER_TRAVEL);
                         usleep(transPeriod);
-                        // unload it
+
+                        // unload ore
                         FillSmelterInfo(&smelterInfo, prioSmelter->getSmelterId(), prioSmelter->getOreType(),
                                         prioSmelter->getCapacity(), prioSmelter->getWaitingOreCount(),
                                         prioSmelter->getIngotCount());
@@ -318,17 +332,20 @@ void *TransporterMain(void *p) {
                     }
                     pthread_mutex_unlock(&iSmelterPrioMut);
 
-                    /* Then Check for Producers with empty storage space */
+                    /* If no Prioritized agent is present, Check for Producers with empty storage space */
+
                     pthread_mutex_lock(&foundryMut);
                     for (int j = 0; j < foundries.size(); ++j) {
                         if (!foundries[j]->checkQuit() and !foundries[j]->isFullIron()) {
+
                             // travel
-                            FillFoundryInfo(&foundryInfo, foundries[j]->getFoundryId(), 0, 0, 0, 0); // 0000?
+                            FillFoundryInfo(&foundryInfo, foundries[j]->getFoundryId(), 0, 0, 0, 0);
                             FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                                 &(transporter->getOre()->type));
                             WriteOutput(NULL, &transporterInfo, NULL, &foundryInfo, TRANSPORTER_TRAVEL);
                             usleep(transPeriod);
-                            // unload it
+
+                            // unload ore
                             FillFoundryInfo(&foundryInfo, foundries[j]->getFoundryId(), foundries[j]->getCapacity(),
                                             foundries[j]->getWaitingIronCount(), foundries[j]->getWaitingCoalCount(),
                                             foundries[j]->getIngotCount());
@@ -350,13 +367,15 @@ void *TransporterMain(void *p) {
                     pthread_mutex_lock(&iSmelterMut);
                     for (int j = 0; j < ironSmelters.size(); ++j) {
                         if (!ironSmelters[j]->checkQuit() and !ironSmelters[j]->isFull()) {
+
                             // travel
-                            FillSmelterInfo(&smelterInfo, ironSmelters[j]->getSmelterId(), (OreType) 0, 0, 0, 0); // 000?
+                            FillSmelterInfo(&smelterInfo, ironSmelters[j]->getSmelterId(), (OreType) 0, 0, 0, 0);
                             FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                                 &(transporter->getOre()->type));
                             WriteOutput(NULL, &transporterInfo, &smelterInfo, NULL, TRANSPORTER_TRAVEL);
                             usleep(transPeriod);
-                            // unload it
+
+                            // unload ore
                             FillSmelterInfo(&smelterInfo, ironSmelters[j]->getSmelterId(), ironSmelters[j]->getOreType(),
                                             ironSmelters[j]->getCapacity(), ironSmelters[j]->getWaitingOreCount(),
                                             ironSmelters[j]->getIngotCount());
@@ -374,23 +393,29 @@ void *TransporterMain(void *p) {
                     pthread_mutex_unlock(&iSmelterMut);
                     if (unloadedOre)
                         break;
+
+                    /* If no Iron Producer available then wait on them */
+                    sem_wait(&semTransIron);
                 }
                 else if (transporter->getOre()->type == 1) {
-                    // COPPER
+                    /* COPPER */
 
-                    /* First Check Prioritized Producers */
+                    /* First Check for Prioritized Copper Producers */
+
                     pthread_mutex_lock(&cSmelterPrioMut);
                     if (!prioritizedCopperSmelters.empty()) {
                         Smelter * prioSmelter = prioritizedCopperSmelters.front();
                         prioritizedCopperSmelters.pop();
                         pthread_mutex_unlock(&cSmelterPrioMut);
+
                         // travel
-                        FillSmelterInfo(&smelterInfo, prioSmelter->getSmelterId(), (OreType) 0, 0, 0, 0); // 000?
+                        FillSmelterInfo(&smelterInfo, prioSmelter->getSmelterId(), (OreType) 0, 0, 0, 0);
                         FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                             &(transporter->getOre()->type));
                         WriteOutput(NULL, &transporterInfo, &smelterInfo, NULL, TRANSPORTER_TRAVEL);
                         usleep(transPeriod);
-                        // unload it
+
+                        // unload ore
                         FillSmelterInfo(&smelterInfo, prioSmelter->getSmelterId(), prioSmelter->getOreType(),
                                         prioSmelter->getCapacity(), prioSmelter->getWaitingOreCount(),
                                         prioSmelter->getIngotCount());
@@ -405,12 +430,13 @@ void *TransporterMain(void *p) {
                     }
                     pthread_mutex_unlock(&cSmelterPrioMut);
 
-                    /* Then Check for Producers with empty storage space */
+                    /* If no Prioritized agent is present, Check for Producers with empty storage space */
+
                     pthread_mutex_lock(&cSmelterMut);
                     for (int j = 0; j < copperSmelters.size(); ++j) {
                         if (!copperSmelters[j]->checkQuit() and !copperSmelters[j]->isFull()) {
                             // travel
-                            FillSmelterInfo(&smelterInfo, copperSmelters[j]->getSmelterId(), (OreType) 0, 0, 0, 0); // 000?
+                            FillSmelterInfo(&smelterInfo, copperSmelters[j]->getSmelterId(), (OreType) 0, 0, 0, 0);
                             FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                                 &(transporter->getOre()->type));
                             WriteOutput(NULL, &transporterInfo, &smelterInfo, NULL, TRANSPORTER_TRAVEL);
@@ -433,23 +459,29 @@ void *TransporterMain(void *p) {
                     pthread_mutex_unlock(&cSmelterMut);
                     if (unloadedOre)
                         break;
+
+                    /* If no Copper Producer available then wait on them */
+                    sem_wait(&semTransCopper);
                 }
                 else if (transporter->getOre()->type == 2) {
-                    // COAL
+                    /* COAL */
 
-                    /* First Check Prioritized Producers */
-                    pthread_mutex_lock(&foundryPrioMut);
-                    if (!prioritizedFoundries.empty()) {
-                        Foundry * prioFoundry = prioritizedFoundries.front();
-                        prioritizedFoundries.pop();
-                        pthread_mutex_unlock(&foundryPrioMut);
+                    /* First Check Prioritized Coal Producers */
+
+                    pthread_mutex_lock(&cFoundryPrioMut);
+                    if (!coalPrioritizedFoundries.empty()) {
+                        Foundry * prioFoundry = coalPrioritizedFoundries.front();
+                        coalPrioritizedFoundries.pop();
+                        pthread_mutex_unlock(&cFoundryPrioMut);
+
                         // travel
-                        FillFoundryInfo(&foundryInfo, prioFoundry->getFoundryId(), 0, 0, 0, 0); // 0000?
+                        FillFoundryInfo(&foundryInfo, prioFoundry->getFoundryId(), 0, 0, 0, 0);
                         FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                             &(transporter->getOre()->type));
                         WriteOutput(NULL, &transporterInfo, NULL, &foundryInfo, TRANSPORTER_TRAVEL);
                         usleep(transPeriod);
-                        // unload it
+
+                        // unload ore
                         FillFoundryInfo(&foundryInfo, prioFoundry->getFoundryId(), prioFoundry->getCapacity(),
                                         prioFoundry->getWaitingIronCount(), prioFoundry->getWaitingCoalCount(),
                                         prioFoundry->getIngotCount());
@@ -462,14 +494,15 @@ void *TransporterMain(void *p) {
                         prioFoundry->notify();
                         break;
                     }
-                    pthread_mutex_unlock(&foundryPrioMut);
+                    pthread_mutex_unlock(&cFoundryPrioMut);
 
-                    /* Then Check for Producers with empty storage space */
+                    /* If no Prioritized agent is present, Check for Producers with empty storage space */
+
                     pthread_mutex_lock(&foundryMut);
                     for (int j = 0; j < foundries.size(); ++j) {
                         if (!foundries[j]->checkQuit() and !foundries[j]->isFullCoal()) {
                             // travel
-                            FillFoundryInfo(&foundryInfo, foundries[j]->getFoundryId(), 0, 0, 0, 0); // 0000?
+                            FillFoundryInfo(&foundryInfo, foundries[j]->getFoundryId(), 0, 0, 0, 0);
                             FillTransporterInfo(&transporterInfo, transporter->getTransporterId(),
                                                 &(transporter->getOre()->type));
                             WriteOutput(NULL, &transporterInfo, NULL, &foundryInfo, TRANSPORTER_TRAVEL);
@@ -492,25 +525,26 @@ void *TransporterMain(void *p) {
                     pthread_mutex_unlock(&foundryMut);
                     if (unloadedOre)
                         break;
-                }
 
-                /* if no producer available then wait on them */
-                sem_wait(&semTransProducers);
+                    /* if no Coal Producer available then wait on them */
+                    sem_wait(&semTransCoal);
+                }
             }
         }
         else if (allMinersExitted) {
-            // if all miners exitted and transporter in here, then quit
+            /* If all miners exitted, quit. */
+
             pthread_mutex_unlock (&mExitMut);
             FillTransporterInfo(&transporterInfo, transporter->getTransporterId(), &(transporter->getOre()->type));
             WriteOutput(NULL, &transporterInfo, NULL, NULL, TRANSPORTER_STOPPED);
 
-            // notify next sleeping transporter
+            // Dont forget to notify next sleeping transporter
             sem_post(&semTransMiners);
-            // sem_post(&semTransProducers);
             break;
         }
         else {
             pthread_mutex_unlock (&mExitMut);
+
             /* oreNotAvailable in any of the miners so wait */
             sem_wait(&semTransMiners);
         }
@@ -519,17 +553,20 @@ void *TransporterMain(void *p) {
 }
 
 void *SmelterMain(void *p) {
+    /* Smelter main routine */
     Smelter *smelter = (Smelter *) p;
     double sPeriod = smelter->getPeriod() - (smelter->getPeriod()*0.01) + (rand()%(int)(smelter->getPeriod()*0.02));
     bool qFlag = false;
+
     SmelterInfo smelterInfo;
     FillSmelterInfo(&smelterInfo, smelter->getSmelterId(), smelter->getOreType(), smelter->getCapacity(),
                     smelter->getWaitingOreCount(), smelter->getIngotCount());
     WriteOutput(NULL, NULL, &smelterInfo, NULL, SMELTER_CREATED);
+
     while (true) {
-        while (!smelter->hasEnoughOres()) {
+        if (!smelter->hasEnoughOres()) {
             if (!smelter->isEmpty()) {
-                // if smelter waits for only 1 ore add it to prioritized smelter queue
+                /* if smelter waits for only 1 ore add it to prioritized smelter queue */
                 if (smelter->getOreType() == IRON) {
                     pthread_mutex_lock (&iSmelterPrioMut);
                     prioritizedIronSmelters.push(smelter);
@@ -541,7 +578,9 @@ void *SmelterMain(void *p) {
                     pthread_mutex_unlock (&cSmelterPrioMut);
                 }
             }
-            // create a timer thread
+
+            /* create a timer thread for 5 second timeout */
+
             StimerParam * stp = new StimerParam;
             stp->id = smelter->getSmelterId() - 1;
             int timerId = smelter->addTimer();
@@ -549,23 +588,26 @@ void *SmelterMain(void *p) {
             pthread_t tid;
             pthread_create(&tid, NULL, sTimer, (void *) stp);
             pthread_detach(tid);
-            // wait on smelter
             smelter->ClearTimeout();
-            if (!smelter->hasEnoughOres())
+
+            // wait on smelter
+            while (!smelter->hasEnoughOres()) {
                 smelter->wait();
-            if (smelter->CheckTimeout()) {
-                // Timeout -- quit
-                smelter->setQuit();
-                qFlag = true;
-                FillSmelterInfo(&smelterInfo, smelter->getSmelterId(), smelter->getOreType(), smelter->getCapacity(),
-                                smelter->getWaitingOreCount(), smelter->getIngotCount());
-                WriteOutput(NULL, NULL, &smelterInfo, NULL, SMELTER_STOPPED);
-                break;
+                if (smelter->CheckTimeout()) {
+                    /* Timeout -- quit */
+                    smelter->setQuit();
+                    qFlag = true;
+                    FillSmelterInfo(&smelterInfo, smelter->getSmelterId(), smelter->getOreType(), smelter->getCapacity(),
+                                    smelter->getWaitingOreCount(), smelter->getIngotCount());
+                    WriteOutput(NULL, NULL, &smelterInfo, NULL, SMELTER_STOPPED);
+                    break;
+                }
             }
             smelter->getTimers()[timerId] = false;
         }
         if (qFlag)
             break;
+
         // ProduceIngot
         FillSmelterInfo(&smelterInfo, smelter->getSmelterId(), smelter->getOreType(), smelter->getCapacity(),
                         smelter->getWaitingOreCount(), smelter->getIngotCount());
@@ -573,7 +615,10 @@ void *SmelterMain(void *p) {
         usleep(sPeriod);
         smelter->produceIngot();
 
-        sem_post(&semTransProducers);
+        if (smelter->getOreType() == IRON)
+            sem_post(&semTransIron);
+        else
+            sem_post(&semTransCopper);
 
         FillSmelterInfo(&smelterInfo, smelter->getSmelterId(), smelter->getOreType(), smelter->getCapacity(),
                         smelter->getWaitingOreCount(), smelter->getIngotCount());
@@ -583,21 +628,33 @@ void *SmelterMain(void *p) {
 }
 
 void *FoundryMain(void *p) {
+    /* Foundry main routine */
     Foundry *foundry = (Foundry *) p;
     double fPeriod = foundry->getPeriod() - (foundry->getPeriod()*0.01) + (rand()%(int)(foundry->getPeriod()*0.02));
     bool qFlag = false;
+
     FoundryInfo foundryInfo;
-    FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(), foundry->getWaitingCoalCount(), foundry->getIngotCount());
+    FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(),
+            foundry->getWaitingCoalCount(), foundry->getIngotCount());
     WriteOutput(NULL, NULL, NULL, &foundryInfo, FOUNDRY_CREATED);
+
     while (true) {
-        while (!foundry->hasEnoughOres()) {
-            if ((!foundry->isEmptyIron() and foundry->isEmptyCoal()) or (foundry->isEmptyIron() and !foundry->isEmptyCoal()) ) {
-                // if foundry waits for only 1 ore add it to prioritized foundry queue
-                pthread_mutex_lock (&foundryPrioMut);
-                prioritizedFoundries.push(foundry);
-                pthread_mutex_unlock (&foundryPrioMut);
+        if (!foundry->hasEnoughOres()) {
+            if (!foundry->isEmptyIron() and foundry->isEmptyCoal()) {
+                /* if foundry has 1 iron already and waits for 1 coal add it to cPrioritized foundry queue */
+                pthread_mutex_lock (&cFoundryPrioMut);
+                coalPrioritizedFoundries.push(foundry);
+                pthread_mutex_unlock (&cFoundryPrioMut);
             }
-            // create a timer thread
+            else if (!foundry->isEmptyCoal() and foundry->isEmptyIron()) {
+                /* if foundry has 1 coal already and waits for 1 iron add it to iPrioritized foundry queue */
+                pthread_mutex_lock (&iFoundryPrioMut);
+                ironPrioritizedFoundries.push(foundry);
+                pthread_mutex_unlock (&iFoundryPrioMut);
+            }
+
+            /* create a timer thread for 5 second timeout */
+
             FtimerParam * ftp = new FtimerParam;
             ftp->id = foundry->getFoundryId() - 1;
             int timerId = foundry->addTimer();
@@ -605,37 +662,45 @@ void *FoundryMain(void *p) {
             pthread_t tid;
             pthread_create(&tid, NULL, fTimer, (void *) ftp);
             pthread_detach(tid);
-            // wait on foundry
             foundry->ClearTimeout();
-            if (foundry->hasEnoughOres())
+
+            // wait on foundry
+            while (!foundry->hasEnoughOres()) {
                 foundry->wait();
-            if (foundry->CheckTimeout()) {
-                // Timeout -- quit
-                foundry->setQuit();
-                qFlag = true;
-                FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(), foundry->getWaitingCoalCount(), foundry->getIngotCount());
-                WriteOutput(NULL, NULL, NULL, &foundryInfo, FOUNDRY_STOPPED);
-                break;
+                if (foundry->CheckTimeout()) {
+                    /* Timeout -- quit */
+                    foundry->setQuit();
+                    qFlag = true;
+                    FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(),
+                                    foundry->getWaitingIronCount(), foundry->getWaitingCoalCount(), foundry->getIngotCount());
+                    WriteOutput(NULL, NULL, NULL, &foundryInfo, FOUNDRY_STOPPED);
+                    break;
+                }
             }
             foundry->getTimers()[timerId] = false;
         }
         if (qFlag)
             break;
+
         // ProduceIngot
-        FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(), foundry->getWaitingCoalCount(), foundry->getIngotCount());
+        FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(),
+                foundry->getWaitingCoalCount(), foundry->getIngotCount());
         WriteOutput(NULL, NULL, NULL, &foundryInfo, FOUNDRY_STARTED);
         usleep(fPeriod);
         foundry->produceIngot();
 
-        sem_post(&semTransProducers);
+        sem_post(&semTransIron);
+        sem_post(&semTransCoal);
 
-        FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(), foundry->getWaitingCoalCount(), foundry->getIngotCount());
+        FillFoundryInfo(&foundryInfo, foundry->getFoundryId(), foundry->getCapacity(), foundry->getWaitingIronCount(),
+                foundry->getWaitingCoalCount(), foundry->getIngotCount());
         WriteOutput(NULL, NULL, NULL, &foundryInfo, FOUNDRY_FINISHED);
     }
     return NULL;
 }
 
 void *sTimer(void *p) {
+    /* 5 Seconds Timer for smelters */
     StimerParam *stp = (StimerParam *) p;
     sleep(5);
     pthread_mutex_lock (&smelterMut);
@@ -648,6 +713,7 @@ void *sTimer(void *p) {
 }
 
 void *fTimer(void *p) {
+    /* 5 Seconds Timer for foundries */
     FtimerParam *ftp = (FtimerParam *) p;
     sleep(5);
     pthread_mutex_lock (&foundryMut);

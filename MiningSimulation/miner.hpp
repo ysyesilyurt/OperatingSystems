@@ -87,7 +87,7 @@ public:
 
     int getCurrOreCount() {
         __synchronized__;
-        return oreCount;
+        return storage.size();
     }
 
     OreType getOreType() {
