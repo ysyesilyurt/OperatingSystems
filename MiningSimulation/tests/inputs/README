@@ -1,0 +1,41 @@
+###############################                     INPUT FORMAT                      #################################
+
+#######################################################################################################################
+#                                                                                                                     #
+#    First line will contain number of miners (Nm) in the simulation. Following Nm lines contain the properties       #
+#    of the miner with ith ID (All IDs start from 1) in the following format:                                         #
+#        - Im Cm Tm Rm where                                                                                          #
+#            • Im is an unsigned integer representing the production and wait interval of the miner.                  #
+#            It is given in microseconds. The miner will sleep this amount during and between                         #
+#            production of each ore with slight deviation.                                                            #
+#            • Cm is an unsigned integer representing the storage capacity of the miner.                              #
+#            • Tm is an unsigned integer representing the oretype of the miner. Ores have corresponding values:       #
+#                – IRON: 0                                                                                            #
+#                – COPPER: 1                                                                                          #
+#                – COAL: 2                                                                                            #
+#            • Rn is an unsigned integer representing the total amount of ore that can be extracted                   #
+#            from the mine.                                                                                           #
+#    Next line contains the number of transporters (Nt) in the simulation. Following Nt lines contain the properties  #
+#    of the transporters with ith ID in the following format:                                                         #
+#        - It                                                                                                         #
+#            • It is an unsigned integer representing the travel and load/unload time of the transporter.             #
+#            It is given in microseconds. The transporter will sleep this amount during travel or                     #
+#            load/unload operation slight deviation.                                                                  #
+#    Next line contains the number of smelters (Ns) in the simulation. Following Ns lines contain                     #
+#    the properties of the smelters with ith ID in the following format:                                              #
+#        - Is Cs Ts                                                                                                   #
+#            • Is is an unsigned integer representing the production interval of the smelter. It is given             #
+#            in microseconds. The smelter will sleep this amount during production of each ingot                      #
+#            with slight deviation.                                                                                   #
+#            • Cs is an unsigned integer representing the storage capacity for ores of the smelter.                   #
+#            • Ts is an unsigned integer representing the oretype of the smelters. It can be IRON or                  #
+#            COPPER with 0 and 1 values respectively.                                                                 #
+#    Next line contains the number of foundries (Nf) in the simulation. Following Nf lines contain                    #
+#    the properties of the foundries with ith ID in the following format:                                             #
+#        - If Cf                                                                                                      #
+#            • If is an unsigned integer representing the production interval of the foundry. It is given             #
+#            in microseconds. The foundry will sleep this amount during production of each ingot                      #
+#            with slight deviation.                                                                                   #
+#            • Cf is an unsigned integer representing the storage capacity for ores of the foundry.                   #
+#                                                                                                                     #
+#######################################################################################################################
