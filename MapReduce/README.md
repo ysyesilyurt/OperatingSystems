@@ -2,6 +2,11 @@
 
 C Implementation for MapReduce programming model which is associated with processing and generating big data sets with a parallel and distributed algorithm on a platform.
 
+#### Keywords
+```
+MapReduce, IPC, pipe, dup, exec
+```
+
 ## Usage
 ```
 git clone https://github.com/ysyesilyurt/OS-2019

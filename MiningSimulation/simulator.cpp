@@ -7,6 +7,14 @@
 #include "transporter.hpp"
 #include "ingoters.hpp"
 
+/*
+ * Implementation for a Mining Simulation
+ *
+ * Usage: ./simulator < inp.txt > out.txt
+ *
+ *  MIT (c) 2019 Yavuz Selim Yesilyurt
+ */
+
 void *MinerMain(void *);
 void *TransporterMain(void *);
 void *SmelterMain(void *);
@@ -14,7 +22,7 @@ void *FoundryMain(void *);
 void *sTimer(void *);
 void *fTimer(void *);
 
-/* global variables */
+/* Global Variables */
 
 pthread_mutex_t minerMut =  PTHREAD_MUTEX_INITIALIZER;
 int lastMiner = 0;
