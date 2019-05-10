@@ -11,8 +11,8 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
-#ifndef CSC369_EXT2_FS_H
-#define CSC369_EXT2_FS_H
+#ifndef _EXT2_FS_H
+#define _EXT2_FS_H
 
 
 /*
