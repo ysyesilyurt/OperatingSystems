@@ -11,8 +11,8 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
-#ifndef _EXT2_FS_H
-#define _EXT2_FS_H
+#ifndef _OS_2019_EXT2_FS_H
+#define _OS_2019_EXT2_FS_H
 
 
 /*
@@ -205,4 +205,4 @@ struct ext2_dir_entry {
 
 #define    EXT2_FT_MAX      8
 
-#endif
+#endif /* _OS_2019_EXT2_FS_H */

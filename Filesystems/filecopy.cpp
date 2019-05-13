@@ -62,12 +62,11 @@ int main(int argc, char* argv[]) {
     inodeBitmap = new bmap[block_size];
 
     /* Read Zeroth Group descriptor into group and read Bitmaps accordingly with BG */
-    numGroups = super.s_inodes_count/super.s_inodes_per_group; // ??? ceiling of this division ?
+    numGroups = (super.s_inodes_per_group + super.s_inodes_count - 1)/super.s_inodes_per_group;
     changeBlockGroup(0, true);
 
     /* Read target */
     targetInodeNo = resolveTargetInode(argv[3]);
-    // std::cout << "targetInodeNo: " << targetInodeNo << "\n";
 
     /* Open sourcefile */
     if ((sFile = open(argv[2], O_RDONLY)) < 0) {
@@ -85,7 +84,7 @@ int main(int argc, char* argv[]) {
         ptr = strtok(NULL, "/");
     }
 
-    /* Handle newInode stuff for your to-be-copied */
+    /* Handle newInode stuff for your new copy of sourcefile */
     allocateNewInode();
     fillMeta(&newInode, sFile);
     std::cout << inodeNo << " ";
@@ -104,7 +103,7 @@ int main(int argc, char* argv[]) {
         directCounter++;
     }
 
-    newInode.i_blocks = directCounter + 1; // 512 BYTES ?!!!!!!!!!!!!??????????????!!!!!!!!!!!
+    newInode.i_blocks = directCounter * (block_size / 512);
 
     putToTarget(fileName);
 
@@ -134,8 +133,12 @@ int main(int argc, char* argv[]) {
     delete [] blockBitmap;
     delete [] inodeBitmap;
 
+    /* Close sourcefile */
+    close(sFile);
+
     /* Close ext2 image file*/
     close(image);
+
     std::cout << "\n";
     return 0;
 }
@@ -162,11 +165,11 @@ int resolveTargetInode(char * target) {
         unsigned char block[block_size];
         unsigned int containingBgId;
         int tempInodeNo = 2, pathIndex = 0;
-        ext2_inode tempInode;
+        struct ext2_inode tempInode;
+
         while (!found) {
             // Read tempInodeNo's inode into tempInode
-            lseek(image, BLOCK_OFFSET(group.bg_inode_table) + (tempInodeNo - 1) * sizeof(struct ext2_inode),
-                  SEEK_SET);
+            lseek(image, BLOCK_OFFSET(group.bg_inode_table) + (tempInodeNo - 1) * sizeof(struct ext2_inode), SEEK_SET);
             read(image, &tempInode, sizeof(struct ext2_inode));
 
             // Traverse tempInode's data blocks
@@ -178,8 +181,7 @@ int resolveTargetInode(char * target) {
                 struct ext2_dir_entry* entry = (struct ext2_dir_entry*)block;
 
                 // Traverse dir entries of data block i
-                while (size <= block_size && entry->inode) { // lost_found_inode.i_size ?, if entry->inode => switch to a new data block
-                    // Dont forget that each dir-entry in here corresponds to a file/dir under this directory
+                while (size <= block_size && entry->inode) {
                     if (!strncmp(entry->name, path[pathIndex], EXT2_NAME_LEN)) {
                         /* Found the entry in current dir hierarchy */
                         if (pathIndex+1 == path.size()) {
@@ -207,6 +209,7 @@ int resolveTargetInode(char * target) {
 }
 
 void fillMeta(ext2_inode * inode, int file) {
+
     struct stat fileStat;
     if(fstat(file, &fileStat) < 0) {
         fprintf(stderr, "Could not read stat of sourcefile, exitting.");
@@ -216,7 +219,7 @@ void fillMeta(ext2_inode * inode, int file) {
     inode->i_uid = fileStat.st_uid;
     inode->i_gid = fileStat.st_gid;
     inode->i_size = fileStat.st_size;
-    inode->i_blocks = fileStat.st_blocks; // ?? st_blocks gives number of 512B blocks allocated, we have a block size 1K
+    inode->i_blocks = fileStat.st_blocks; // Will be overwritten
     inode->i_atime = fileStat.st_atime;
     inode->i_mtime = fileStat.st_mtime;
     inode->i_ctime = fileStat.st_ctime;
@@ -228,7 +231,7 @@ void changeBlockGroup(int bgID, bool first) {
 
     if (bgID >= numGroups) {
         fprintf(stderr, "Memory limit reached, no more block groups!");
-        exit(2);
+        exit(3);
     }
 
     if (!first) {
@@ -259,6 +262,7 @@ void changeBlockGroup(int bgID, bool first) {
 
 void allocateNewInode() {
     /* Place new inode into next empty place for inodes */
+
     unsigned int size = 0;
     while (true) {
         if (!BM_ISSET(inodeNo-1, inodeBitmap)) {
@@ -276,7 +280,7 @@ void allocateNewInode() {
         }
         if (size + super.s_inode_size >= super.s_inodes_count * super.s_inode_size) {
             // Block group border reached, Change group
-            unsigned int containingBgId = (inodeNo - 1) / super.s_inodes_per_group; // (blockNo - 1) ?
+            unsigned int containingBgId = (inodeNo - 1) / super.s_inodes_per_group;
             changeBlockGroup(containingBgId, false);
             size = 0;
         }
@@ -315,7 +319,7 @@ void putToTarget(char * fileName) {
 
         // Traverse dir entries of data block i
         size = 0;
-        while (size < block_size) { // entry->inode ???
+        while (size < block_size) {
             const size_t realEntrySize = actualDirEntrySize(entry);
             if (entry->rec_len > realEntrySize) {
                 /* Last entry found */
@@ -331,8 +335,8 @@ void putToTarget(char * fileName) {
                     entry->rec_len = realEntrySize;
 
                     /* Write changes to in dir entry to image */
-                    if (!BM_ISSET(targetInode.i_block[i], blockBitmap)) // -1 ?
-                        BM_SET(targetInode.i_block[i], blockBitmap); // -1 ?
+                    if (!BM_ISSET(targetInode.i_block[i], blockBitmap))
+                        BM_SET(targetInode.i_block[i], blockBitmap);
                     lseek(image, BLOCK_OFFSET(targetInode.i_block[i]), SEEK_SET);
                     write(image, buff, block_size);
 
@@ -354,7 +358,7 @@ void putToTarget(char * fileName) {
 unsigned int writeToBlock(unsigned char block[]) {
     /* Finds new available data block and writes data in "block" to there */
     /* Returns data block id */
-    int blockNo = super.s_first_data_block; // 1?
+    int blockNo = super.s_first_data_block;
     unsigned int size = 0;
     while (true) {
         if (!BM_ISSET(blockNo-1, blockBitmap)) {
