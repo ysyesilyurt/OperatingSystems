@@ -26,7 +26,7 @@ unsigned int block_size = 0;
 int resolveTargetInode(char *);
 void fillMeta(ext2_inode*, int);
 void changeBlockGroup(int, bool);
-unsigned int writeToBlock(unsigned char[]);
+unsigned int writeToBlock(unsigned char *);
 size_t actualDirEntrySize(unsigned int);
 size_t actualDirEntrySize(struct ext2_dir_entry*);
 void allocateNewInode();
@@ -355,7 +355,7 @@ void putToTarget(char * fileName) {
     }
 }
 
-unsigned int writeToBlock(unsigned char block[]) {
+unsigned int writeToBlock(unsigned char * block) {
     /* Finds new available data block and writes data in "block" to there */
     /* Returns data block id */
     int blockNo = super.s_first_data_block;
@@ -375,6 +375,7 @@ unsigned int writeToBlock(unsigned char block[]) {
             containingBgId = (super.s_first_data_block + blockNo - 1) / super.s_blocks_per_group;
             changeBlockGroup(containingBgId, false);
             size = 0;
+            blockNo++;
         }
         else {
             size += block_size;
