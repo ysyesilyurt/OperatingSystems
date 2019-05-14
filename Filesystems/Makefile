@@ -10,12 +10,12 @@ create:
 		mke2fs -N 32 image.img
 
 mount:
-        mkdir mnt
+		mkdir mnt
 		sudo mount -o loop image.img mnt/
 
 umount:
 		sudo umount mnt
-        rm -rf mnt
+		rm -rf mnt
 
 clean:
 		sudo rm -rf image.img filecopy
