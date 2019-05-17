@@ -8,6 +8,7 @@
 #include "ext2.h"
 
 #define BASE_OFFSET 1024
+#define FOURK_OFFSET 2048
 #define EXT2_BLOCK_SIZE 1024
 #define IMAGE "image.img"
 
@@ -121,7 +122,10 @@ int main(int argc, char* argv[]) {
     write(image, blockBitmap, block_size);
 
     /* Overwrite changes in group and super */
-    lseek(image, BASE_OFFSET+sizeof(super)+sizeof(group)*currGid, SEEK_SET);
+    if (block_size == 4096)
+        lseek(image, BASE_OFFSET + sizeof(super)+ FOURK_OFFSET + sizeof(group)*currGid, SEEK_SET);
+    else
+        lseek(image, BASE_OFFSET + sizeof(super)+sizeof(group)*currGid, SEEK_SET);
     write(image, &group, sizeof(group));
 
     lseek(image, BASE_OFFSET, SEEK_SET);
@@ -240,7 +244,10 @@ void changeBlockGroup(int bgID, bool first) {
 
     if (!first) {
         /* First Overwrite changes in old Group and bitmaps*/
-        lseek(image, BASE_OFFSET+sizeof(super)+sizeof(group)*currGid, SEEK_SET);
+        if (block_size == 4096)
+            lseek(image, BASE_OFFSET+sizeof(super)+ FOURK_OFFSET + sizeof(group)*currGid, SEEK_SET);
+        else
+            lseek(image, BASE_OFFSET+sizeof(super) + sizeof(group)*currGid, SEEK_SET);
         write(image, &group, sizeof(group));
 
         lseek(image, BLOCK_OFFSET(group.bg_block_bitmap), SEEK_SET);
@@ -253,7 +260,10 @@ void changeBlockGroup(int bgID, bool first) {
     currGid = bgID;
 
     /* Then change BG */
-    lseek(image, BASE_OFFSET+sizeof(super)+sizeof(group)*currGid, SEEK_SET);
+    if (block_size == 4096)
+        lseek(image, BASE_OFFSET+sizeof(super)+ FOURK_OFFSET + sizeof(group)*currGid, SEEK_SET);
+    else
+        lseek(image, BASE_OFFSET+sizeof(super) + sizeof(group)*currGid, SEEK_SET);
     read(image, &group, sizeof(group));
 
     /* and change bitmaps */
