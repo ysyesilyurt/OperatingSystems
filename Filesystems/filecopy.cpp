@@ -85,6 +85,7 @@ int main(int argc, char* argv[]) {
     }
 
     /* Handle newInode stuff for your new copy of sourcefile */
+    changeBlockGroup(0, false);
     allocateNewInode();
     fillMeta(&newInode, sFile);
     std::cout << inodeNo << " ";
@@ -101,6 +102,7 @@ int main(int argc, char* argv[]) {
         if (readBytes < block_size)
             memset(block + readBytes, 0, block_size - readBytes);
         newInode.i_block[directCounter] = writeToBlock(block);
+        std::cout << blockNo << " ";
         size += block_size;
         directCounter++;
     }
@@ -110,13 +112,6 @@ int main(int argc, char* argv[]) {
     putToTarget(fileName);
 
     /* Write all changes to image */
-
-    /* Write inode to img */
-    // change group desc if needed
-    changeBlockGroup(newInodeGid, false);
-    inodeIndex = (inodeNo - 1) % super.s_inodes_per_group;
-    lseek(image, BLOCK_OFFSET(group.bg_inode_table) + (inodeIndex * sizeof(struct ext2_inode)), SEEK_SET);
-    write(image, &newInode, sizeof(struct ext2_inode));
 
     /* Overwrite bitmaps into image */
     lseek(image, BLOCK_OFFSET(group.bg_inode_bitmap), SEEK_SET);
@@ -131,6 +126,12 @@ int main(int argc, char* argv[]) {
 
     lseek(image, BASE_OFFSET, SEEK_SET);
     write(image, &super, sizeof(super));
+
+    /* Write inode to img */
+    changeBlockGroup(newInodeGid, false);
+    inodeIndex = (inodeNo - 1) % super.s_inodes_per_group;
+    lseek(image, BLOCK_OFFSET(group.bg_inode_table) + (inodeIndex * sizeof(struct ext2_inode)), SEEK_SET);
+    write(image, &newInode, sizeof(struct ext2_inode));
 
     /* Free heap memory */
     delete [] blockBitmap;
@@ -204,7 +205,6 @@ int resolveTargetInode(char * target) {
             }
             pathIndex++;
             containingBgId = (tempInodeNo - 1) / super.s_inodes_per_group;
-            // change group desc if needed
             changeBlockGroup(containingBgId, false);
         }
         return tempInodeNo;
@@ -215,7 +215,7 @@ void fillMeta(ext2_inode * inode, int file) {
 
     struct stat fileStat;
     if(fstat(file, &fileStat) < 0) {
-        fprintf(stderr, "Could not read stat of sourcefile, exitting.");
+        fprintf(stderr, "Could not read stat of sourcefile, exitting.\n");
         exit(2);
     }
     inode->i_mode = fileStat.st_mode;
@@ -232,7 +232,7 @@ void fillMeta(ext2_inode * inode, int file) {
 void changeBlockGroup(int bgID, bool first) {
 
     if (bgID >= numGroups) {
-        fprintf(stderr, "Memory limit reached, no more block groups!");
+        fprintf(stderr, "Memory limit reached, no more block groups!\n");
         exit(3);
     }
     else if (!first && bgID == currGid)
@@ -267,9 +267,6 @@ void changeBlockGroup(int bgID, bool first) {
 void allocateNewInode() {
     /* Place new inode into next empty place for inodes */
 
-    unsigned int size = 0;
-    changeBlockGroup(0, false);
-
     while (true) {
         inodeIndex = (inodeNo - 1) % super.s_inodes_per_group;
         if (!BM_ISSET(inodeIndex, inodeBitmap)) {
@@ -282,17 +279,14 @@ void allocateNewInode() {
             read(image, &newInode, sizeof(struct ext2_inode));
             break;
         }
-        if (size + super.s_inode_size >= super.s_inodes_per_group * super.s_inode_size) {
-            // Block group border reached, Change group
+        if (inodeNo && !(inodeNo % super.s_inodes_per_group)) {
+            // Block group border reached, Switch group
+            inodeNo++;
             containingBgId = (inodeNo - 1) / super.s_inodes_per_group;
             changeBlockGroup(containingBgId, false);
-            size = 0;
-            inodeNo++;
         }
-        else {
-            size += super.s_inode_size;
+        else
             inodeNo++;
-        }
     }
 }
 
@@ -300,13 +294,12 @@ void putToTarget(char * fileName) {
     /* Insert a dirEntry in target data blocks for mapping of new inode to target */
 
     /* Go to targetInode and get its directory data blocks */
-    // change group desc if needed
     containingBgId = (targetInodeNo - 1) / super.s_inodes_per_group;
     changeBlockGroup(containingBgId, false);
 
     // go to targetInode
     struct ext2_inode targetInode;
-    unsigned int targetInodeIndex = (targetInodeNo - 1) % super.s_inodes_per_group;
+    unsigned int targetInodeIndex = (targetInodeNo - 1) % super.s_inodes_per_group, tGid = currGid;
     lseek(image, BLOCK_OFFSET(group.bg_inode_table) + (targetInodeIndex * sizeof(struct ext2_inode)), SEEK_SET);
     read(image, &targetInode, sizeof(struct ext2_inode));
 
@@ -317,6 +310,25 @@ void putToTarget(char * fileName) {
     unsigned int size;
     bool found = false;
     for (int i = 0; i < 12 ; ++i) {
+
+        if (!targetInode.i_block[i]) {
+            /* if current data block of directory is unallocated allocate a new data block
+             * for this dir with new entry in it and its rec_len set to block_size */
+            memset(buff, 0, block_size);
+            struct ext2_dir_entry* newLastEntry = (struct ext2_dir_entry*)((char*)buff);
+            newLastEntry->inode = inodeNo;
+            newLastEntry->file_type = EXT2_FT_REG_FILE;
+            strncpy(newLastEntry->name, fileName, strlen(fileName));
+            newLastEntry->name_len = strlen(fileName);
+            newLastEntry->rec_len = block_size;
+
+            targetInode.i_block[i] = writeToBlock(buff);
+            changeBlockGroup(tGid, false);
+            lseek(image, BLOCK_OFFSET(group.bg_inode_table) + (targetInodeIndex * sizeof(struct ext2_inode)), SEEK_SET);
+            write(image, &targetInode, sizeof(struct ext2_inode));
+            break;
+        }
+
         lseek(image, BLOCK_OFFSET(targetInode.i_block[i]), SEEK_SET);
         read(image, buff, block_size);
         // convert data block to entry
@@ -339,12 +351,8 @@ void putToTarget(char * fileName) {
                     newLastEntry->rec_len = entry->rec_len - realEntrySize;
                     entry->rec_len = realEntrySize;
 
-                    /* Write changes to in dir entry to image */
-                    if (!BM_ISSET(targetInode.i_block[i], blockBitmap))
-                        BM_SET(targetInode.i_block[i], blockBitmap);
                     lseek(image, BLOCK_OFFSET(targetInode.i_block[i]), SEEK_SET);
                     write(image, buff, block_size);
-
                     found = true;
                     break;
                 }
@@ -363,32 +371,36 @@ void putToTarget(char * fileName) {
 unsigned int writeToBlock(unsigned char * block) {
     /* Finds new available data block and writes data in "block" to there */
     /* Returns data block id */
-    unsigned int size = 0, blockIndex;
+    unsigned int blockIndex;
     while (true) {
-        if (blockNo)
-            blockIndex = (blockNo - 1) % super.s_blocks_per_group;
+        if (blockNo) {
+            if (block_size == 1024)
+                blockIndex = (blockNo - 1) % super.s_blocks_per_group;
+            else
+                blockIndex = blockNo % super.s_blocks_per_group;
+        }
         else
             blockIndex = 0;
+
         if (!BM_ISSET(blockIndex, blockBitmap)) {
             group.bg_free_blocks_count--;
             super.s_free_blocks_count--;
             BM_SET(blockIndex, blockBitmap);
-            lseek(image, BLOCK_OFFSET(blockIndex), SEEK_SET);
+            if (block_size == 1024)
+                lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * blockIndex), SEEK_SET);
+            else
+                lseek(image, BLOCK_OFFSET(blockIndex), SEEK_SET);
             write(image, block, block_size);
-            std::cout << blockNo << " ";
             break;
         }
-        if (size + block_size >= super.s_blocks_per_group * block_size) {
-            // Block group border reached, Change group
+        if (blockNo && !(blockNo % super.s_blocks_per_group)) {
+            // Block group border reached, Switch group
+            blockNo++;
             containingBgId = (blockNo - 1) / super.s_blocks_per_group;
             changeBlockGroup(containingBgId, false);
-            size = 0;
-            blockNo++;
         }
-        else {
-            size += block_size;
+        else
             blockNo++;
-        }
     }
     return blockNo;
 }
