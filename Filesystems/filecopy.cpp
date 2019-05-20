@@ -35,12 +35,16 @@ void putToTarget(char *);
 
 /* Global Variables */
 struct ext2_inode newInode;
-int inodeNo = 2, blockNo, inodeIndex, containingBgId, sFileSize;
+int inodeNo = 2, inodeIndex, containingBgId, sFileSize, blockCounter = 0;
+int indBlockNo = 0, indOffset = 0, doubOffset = 0, tripOffset = 0, doubBlockNo = 0, tripBlockNo = 0;
+unsigned int indBindex, doubBindex, tripBindex, indBcounter = 0, doubBcounter = 0, tripBcounter = 0;
+unsigned int blockNo, allocatedDBcount = 0;
 struct ext2_super_block super;
 struct ext2_group_desc group;
 bmap* blockBitmap;
 bmap* inodeBitmap;
 int image, sFile, currGid, numGroups, newInodeGid, targetInodeNo;
+bool firstInd = true, firstDoub = true, firstTrip = true;
 
 int main(int argc, char* argv[]) {
 
@@ -93,22 +97,21 @@ int main(int argc, char* argv[]) {
 
     /* Copy sourcefile contents to new data blocks for new inode */
     unsigned char block[block_size];
-    unsigned int size = 0, directCounter = 0, readBytes;
+    unsigned int size = 0, readBytes;
     blockNo = super.s_first_data_block;
     changeBlockGroup(0, false);
     lseek(sFile, (off_t) 0, SEEK_SET);
-    while (size <= sFileSize && directCounter < 12) {
+    while (size <= sFileSize) {
         /* Read block_size many bytes from sFile to block and write it to First non-reserved data block */
         readBytes = read(sFile, block, block_size);
         if (readBytes < block_size)
             memset(block + readBytes, 0, block_size - readBytes);
-        newInode.i_block[directCounter] = writeToBlock(block);
+        newInode.i_block[blockCounter] = writeToBlock(block);
         std::cout << blockNo << " ";
         size += block_size;
-        directCounter++;
     }
 
-    newInode.i_blocks = directCounter * (block_size / 512);
+    newInode.i_blocks = allocatedDBcount * (block_size / 512);
 
     putToTarget(fileName);
 
@@ -381,7 +384,9 @@ void putToTarget(char * fileName) {
 unsigned int writeToBlock(unsigned char * block) {
     /* Finds new available data block and writes data in "block" to there */
     /* Returns data block id */
-    unsigned int blockIndex;
+    unsigned char buf[block_size];
+    unsigned int * bPtr;
+    unsigned int blockIndex, retVal;
     while (true) {
         if (blockNo) {
             if (block_size == 1024)
@@ -393,9 +398,270 @@ unsigned int writeToBlock(unsigned char * block) {
             blockIndex = 0;
 
         if (!BM_ISSET(blockIndex, blockBitmap)) {
+            allocatedDBcount++;
             group.bg_free_blocks_count--;
             super.s_free_blocks_count--;
             BM_SET(blockIndex, blockBitmap);
+
+            if (blockCounter == 12) {
+                if (indBcounter == 0 && firstInd) {
+                    /* create the single indirect block */
+                    unsigned char indBlock[block_size];
+                    memset(indBlock, 0, block_size);
+                    indBindex = blockIndex;
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                    write(image, indBlock, block_size);
+                    indBlockNo = blockNo;
+                    blockNo++;
+                    firstInd = false;
+                    continue;
+                }
+
+                /* put an index to indirect index block */
+                if (block_size == 1024)
+                    lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                else
+                    lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                read(image, buf, block_size);
+
+                bPtr = (unsigned int*)(buf + (indOffset * sizeof(unsigned int)));
+                *bPtr = blockNo;
+                indOffset++;
+                retVal = indBlockNo;
+
+                if (block_size == 1024)
+                    lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                else
+                    lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                write(image, buf, block_size);
+
+                indBcounter++;
+                if (indBcounter == block_size/4) {
+                    indBcounter = 0;
+                    indOffset = 0;
+                    firstInd = true;
+                    blockCounter++;
+                }
+            }
+
+            else if (blockCounter == 13) {
+                if (doubBcounter == 0 && firstDoub) {
+                    /* create the double indirect block */
+                    unsigned char indBlock[block_size];
+                    memset(indBlock, 0, block_size);
+                    doubBindex = blockIndex;
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
+                    write(image, indBlock, block_size);
+                    doubBlockNo = blockNo;
+                    blockNo++;
+                    firstDoub = false;
+                    doubBcounter++;
+                    continue;
+                }
+
+                if (indBcounter == 0 && firstInd) {
+                    /* create an indirect index block under double indirect */
+                    unsigned char indBlock[block_size];
+                    memset(indBlock, 0, block_size);
+                    indBindex = blockIndex;
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                    write(image, indBlock, block_size);
+                    indBlockNo = blockNo;
+                    firstInd = false;
+                    blockNo++;
+
+                    /* put indirect index to double indirect index block */
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
+                    read(image, buf, block_size);
+
+                    bPtr = (unsigned int*)(buf + (doubOffset * sizeof(unsigned int)));
+                    *bPtr = indBlockNo;
+                    doubOffset++;
+
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
+                    write(image, buf, block_size);
+
+                    doubBcounter++;
+                    if (doubBcounter == block_size/4) {
+                        doubOffset = 0;
+                        doubBcounter = 0;
+                        blockCounter++;
+                        firstInd = true;
+                        firstDoub = true;
+                    }
+                    continue;
+                }
+
+                /* put an index to indirect index block */
+                if (block_size == 1024)
+                    lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                else
+                    lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                read(image, buf, block_size);
+
+                bPtr = (unsigned int*)(buf + (indOffset * sizeof(unsigned int)));
+                *bPtr = blockNo;
+                indOffset++;
+
+                if (block_size == 1024)
+                    lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                else
+                    lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                write(image, buf, block_size);
+
+                indBcounter++;
+                if (indBcounter == block_size/4) {
+                    indOffset = 0;
+                    indBcounter = 0;
+                    firstInd = true;
+                }
+                retVal = doubBlockNo;
+            }
+
+            else if (blockCounter == 14) {
+
+                if (tripBcounter == 0 && firstTrip) {
+                    /* create the triple indirect block */
+                    unsigned char indBlock[block_size];
+                    memset(indBlock, 0, block_size);
+                    tripBindex = blockIndex;
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * tripBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(tripBindex), SEEK_SET);
+                    write(image, indBlock, block_size);
+                    tripBlockNo = blockNo;
+                    blockNo++;
+                    firstTrip = false;
+                    tripBcounter++;
+                    continue;
+                }
+
+                if (doubBcounter == 0 && firstDoub) {
+                    /* create a double indirect index block under triple indirect */
+                    unsigned char indBlock[block_size];
+                    memset(indBlock, 0, block_size);
+                    doubBindex = blockIndex;
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
+                    write(image, indBlock, block_size);
+                    doubBlockNo = blockNo;
+                    firstDoub = false;
+                    blockNo++;
+
+                    /* put double indirect index to triple indirect index block */
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * tripBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(tripBindex), SEEK_SET);
+                    read(image, buf, block_size);
+
+                    bPtr = (unsigned int*)(buf + (tripOffset * sizeof(unsigned int)));
+                    *bPtr = doubBlockNo;
+                    tripOffset++;
+
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * tripBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(tripBindex), SEEK_SET);
+                    write(image, buf, block_size);
+
+                    tripBcounter++;
+                    if (tripBcounter == block_size/4) {
+                        fprintf(stderr, "Triple indirect block is filled.. Memory limit apparently reached..\n");
+                        exit(3);
+                    }
+                    continue;
+                }
+
+                if (indBcounter == 0 && firstInd) {
+                    /* create an indirect index block under double indirect */
+                    unsigned char indBlock[block_size];
+                    memset(indBlock, 0, block_size);
+                    indBindex = blockIndex;
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                    write(image, indBlock, block_size);
+                    indBlockNo = blockNo;
+                    firstInd = false;
+                    blockNo++;
+
+                    /* put indirect index to double indirect index block */
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
+                    read(image, buf, block_size);
+
+                    bPtr = (unsigned int*)(buf + (doubOffset * sizeof(unsigned int)));
+                    *bPtr = indBlockNo;
+                    doubOffset++;
+
+                    if (block_size == 1024)
+                        lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
+                    else
+                        lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
+                    write(image, buf, block_size);
+
+                    doubBcounter++;
+                    if (doubBcounter == block_size/4) {
+                        doubOffset = 0;
+                        doubBcounter = 0;
+                        firstDoub = true;
+                    }
+                    continue;
+                }
+
+                /* put an index to indirect index block */
+                if (block_size == 1024)
+                    lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                else
+                    lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                read(image, buf, block_size);
+
+                bPtr = (unsigned int*)(buf + (indOffset * sizeof(unsigned int)));
+                *bPtr = blockNo;
+                indOffset++;
+
+                if (block_size == 1024)
+                    lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
+                else
+                    lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
+                write(image, buf, block_size);
+
+                indBcounter++;
+                if (indBcounter == block_size/4) {
+                    indOffset = 0;
+                    indBcounter = 0;
+                    firstInd = true;
+                }
+                retVal = tripBlockNo;
+            }
+            else {
+                /* Direct data block */
+                blockCounter++;
+                retVal = blockNo;
+            }
+
             if (block_size == 1024)
                 lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * blockIndex), SEEK_SET);
             else
@@ -403,6 +669,7 @@ unsigned int writeToBlock(unsigned char * block) {
             write(image, block, block_size);
             break;
         }
+
         if (blockNo && !(blockNo % super.s_blocks_per_group)) {
             // Block group border reached, Switch group
             blockNo++;
@@ -412,7 +679,7 @@ unsigned int writeToBlock(unsigned char * block) {
         else
             blockNo++;
     }
-    return blockNo;
+    return retVal;
 }
 
 size_t actualDirEntrySize(unsigned int name_len) {
