@@ -386,22 +386,26 @@ unsigned int writeToBlock(unsigned char * block) {
     /* Returns data block id */
     unsigned char buf[block_size];
     unsigned int * bPtr;
-    unsigned int blockIndex, retVal;
+    unsigned int bitIndex, blockIndex, retVal;
     while (true) {
         if (blockNo) {
-            if (block_size == 1024)
-                blockIndex = (blockNo - 1) % super.s_blocks_per_group;
-            else
-                blockIndex = blockNo % super.s_blocks_per_group;
+            if (block_size == 1024) {
+                bitIndex = (blockNo - 1) % super.s_blocks_per_group;
+                blockIndex = blockNo - 1;
+            }
+            else {
+                bitIndex = blockNo % super.s_blocks_per_group;
+                blockIndex = blockNo;
+            }
         }
         else
             blockIndex = 0;
 
-        if (!BM_ISSET(blockIndex, blockBitmap)) {
+        if (!BM_ISSET(bitIndex, blockBitmap)) {
             allocatedDBcount++;
             group.bg_free_blocks_count--;
             super.s_free_blocks_count--;
-            BM_SET(blockIndex, blockBitmap);
+            BM_SET(bitIndex, blockBitmap);
 
             if (blockCounter == 12) {
                 if (indBcounter == 0 && firstInd) {
@@ -415,12 +419,14 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     indBlockNo = blockNo;
+                    std::cout << blockNo << " ";
                     blockNo++;
                     firstInd = false;
                     continue;
                 }
 
                 /* put an index to indirect index block */
+
                 if (block_size == 1024)
                     lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
                 else
@@ -430,7 +436,6 @@ unsigned int writeToBlock(unsigned char * block) {
                 bPtr = (unsigned int*)(buf + (indOffset * sizeof(unsigned int)));
                 *bPtr = blockNo;
                 indOffset++;
-                retVal = indBlockNo;
 
                 if (block_size == 1024)
                     lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
@@ -445,6 +450,7 @@ unsigned int writeToBlock(unsigned char * block) {
                     firstInd = true;
                     blockCounter++;
                 }
+                retVal = indBlockNo;
             }
 
             else if (blockCounter == 13) {
@@ -459,9 +465,9 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     doubBlockNo = blockNo;
+                    std::cout << blockNo << " ";
                     blockNo++;
                     firstDoub = false;
-                    doubBcounter++;
                     continue;
                 }
 
@@ -476,10 +482,12 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     indBlockNo = blockNo;
+                    std::cout << blockNo << " ";
                     firstInd = false;
                     blockNo++;
 
                     /* put indirect index to double indirect index block */
+
                     if (block_size == 1024)
                         lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
                     else
@@ -498,6 +506,8 @@ unsigned int writeToBlock(unsigned char * block) {
 
                     doubBcounter++;
                     if (doubBcounter == block_size/4) {
+                        indOffset = 0;
+                        indBcounter = 0;
                         doubOffset = 0;
                         doubBcounter = 0;
                         blockCounter++;
@@ -508,6 +518,7 @@ unsigned int writeToBlock(unsigned char * block) {
                 }
 
                 /* put an index to indirect index block */
+
                 if (block_size == 1024)
                     lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
                 else
@@ -534,7 +545,6 @@ unsigned int writeToBlock(unsigned char * block) {
             }
 
             else if (blockCounter == 14) {
-
                 if (tripBcounter == 0 && firstTrip) {
                     /* create the triple indirect block */
                     unsigned char indBlock[block_size];
@@ -546,6 +556,7 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(tripBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     tripBlockNo = blockNo;
+                    std::cout << blockNo << " ";
                     blockNo++;
                     firstTrip = false;
                     tripBcounter++;
@@ -563,10 +574,12 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     doubBlockNo = blockNo;
+                    std::cout << blockNo << " ";
                     firstDoub = false;
                     blockNo++;
 
                     /* put double indirect index to triple indirect index block */
+
                     if (block_size == 1024)
                         lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * tripBindex), SEEK_SET);
                     else
@@ -602,10 +615,12 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     indBlockNo = blockNo;
+                    std::cout << blockNo << " ";
                     firstInd = false;
                     blockNo++;
 
                     /* put indirect index to double indirect index block */
+
                     if (block_size == 1024)
                         lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * doubBindex), SEEK_SET);
                     else
@@ -632,6 +647,7 @@ unsigned int writeToBlock(unsigned char * block) {
                 }
 
                 /* put an index to indirect index block */
+
                 if (block_size == 1024)
                     lseek(image, BLOCK_OFFSET(super.s_first_data_block) + (block_size * indBindex), SEEK_SET);
                 else
@@ -656,6 +672,7 @@ unsigned int writeToBlock(unsigned char * block) {
                 }
                 retVal = tripBlockNo;
             }
+
             else {
                 /* Direct data block */
                 blockCounter++;
