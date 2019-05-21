@@ -38,13 +38,14 @@ struct ext2_inode newInode;
 int inodeNo = 2, inodeIndex, containingBgId, sFileSize, blockCounter = 0;
 int indBlockNo = 0, indOffset = 0, doubOffset = 0, tripOffset = 0, doubBlockNo = 0, tripBlockNo = 0;
 unsigned int indBindex, doubBindex, tripBindex, indBcounter = 0, doubBcounter = 0, tripBcounter = 0;
-unsigned int blockNo, allocatedDBcount = 0;
+unsigned int indirectBlock = 0, doubleBlock = 0, tripleBlock = 0;
+unsigned int blockNo, allocatedDBcount = 0, copySize = 0;
 struct ext2_super_block super;
 struct ext2_group_desc group;
 bmap* blockBitmap;
 bmap* inodeBitmap;
 int image, sFile, currGid, numGroups, newInodeGid, targetInodeNo;
-bool firstInd = true, firstDoub = true, firstTrip = true;
+bool firstInd = true, firstDoub = true, firstTrip = true, sizeFlg = false;
 
 int main(int argc, char* argv[]) {
 
@@ -110,10 +111,14 @@ int main(int argc, char* argv[]) {
         std::cout << blockNo << " ";
         size += block_size;
     }
-
+    newInode.i_block[12] = indirectBlock;
+    newInode.i_block[13] = doubleBlock;
+    newInode.i_block[14] = tripleBlock;
     newInode.i_blocks = allocatedDBcount * (block_size / 512);
 
     putToTarget(fileName);
+    if (sizeFlg)
+        newInode.i_size = copySize;
 
     /* Write all changes to image */
 
@@ -239,7 +244,7 @@ void fillMeta(ext2_inode * inode, int file) {
 void changeBlockGroup(int bgID, bool first) {
 
     if (bgID >= numGroups) {
-        fprintf(stderr, "Memory limit reached, no more block groups!\n");
+        fprintf(stderr, "Storage limit reached, no more block groups!\n");
         exit(3);
     }
     else if (!first && bgID == currGid)
@@ -398,11 +403,14 @@ unsigned int writeToBlock(unsigned char * block) {
                 blockIndex = blockNo;
             }
         }
-        else
+        else {
             blockIndex = 0;
+            bitIndex = 0;
+        }
 
         if (!BM_ISSET(bitIndex, blockBitmap)) {
             allocatedDBcount++;
+            copySize += block_size;
             group.bg_free_blocks_count--;
             super.s_free_blocks_count--;
             BM_SET(bitIndex, blockBitmap);
@@ -419,6 +427,7 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(indBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     indBlockNo = blockNo;
+                    indirectBlock = blockNo;
                     std::cout << blockNo << " ";
                     blockNo++;
                     firstInd = false;
@@ -465,6 +474,7 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(doubBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     doubBlockNo = blockNo;
+                    doubleBlock = blockNo;
                     std::cout << blockNo << " ";
                     blockNo++;
                     firstDoub = false;
@@ -556,10 +566,11 @@ unsigned int writeToBlock(unsigned char * block) {
                         lseek(image, BLOCK_OFFSET(tripBindex), SEEK_SET);
                     write(image, indBlock, block_size);
                     tripBlockNo = blockNo;
+                    tripleBlock = blockNo;
                     std::cout << blockNo << " ";
                     blockNo++;
                     firstTrip = false;
-                    tripBcounter++;
+                    sizeFlg = true;
                     continue;
                 }
 
@@ -598,7 +609,7 @@ unsigned int writeToBlock(unsigned char * block) {
 
                     tripBcounter++;
                     if (tripBcounter == block_size/4) {
-                        fprintf(stderr, "Triple indirect block is filled.. Memory limit apparently reached..\n");
+                        fprintf(stderr, "Triple indirect block is full! Storage limit apparently reached..\n");
                         exit(3);
                     }
                     continue;
