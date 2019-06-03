@@ -6,8 +6,8 @@ compile: filecopy.cpp ext2.h
 		$(CC) filecopy.cpp -o filecopy
 
 create:
-		dd if=/dev/zero of=image.img bs=1024 count=128
-		mke2fs -N 32 image.img
+		dd if=/dev/zero of=image.img bs=1024 count=1024
+		mke2fs -N 64 -g 512 image.img
 
 mount:
 		mkdir mnt

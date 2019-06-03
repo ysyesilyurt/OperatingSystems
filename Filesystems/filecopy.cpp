@@ -9,8 +9,6 @@
 
 #define BASE_OFFSET 1024
 #define FOURK_OFFSET 2048
-#define EXT2_BLOCK_SIZE 1024
-#define IMAGE "image.img"
 
 typedef unsigned char bmap;
 #define __NBITS (8 * (int) sizeof (bmap))
@@ -80,7 +78,7 @@ int main(int argc, char* argv[]) {
         return 2;
     }
 
-    /* Get fileName */
+    /* Get filename */
     char *fileName;
     char temp[EXT2_NAME_LEN];
     strncpy(temp, argv[2], EXT2_NAME_LEN);
