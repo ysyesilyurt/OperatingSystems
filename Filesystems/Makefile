@@ -1,6 +1,6 @@
 CC = g++
 
-all: clean create compile run
+all: clean create compile
 
 compile: filecopy.cpp ext2.h
 		$(CC) filecopy.cpp -o filecopy
