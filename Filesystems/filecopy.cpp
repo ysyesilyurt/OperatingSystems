@@ -1,11 +1,22 @@
 #include <fcntl.h>
-#include <unistd.h>
-#include <string.h>
-#include <vector>
 #include <iostream>
+#include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
 
 #include "ext2.h"
+
+/*
+ * EXT2 Filecopy Implementation up to Triple Blocks
+ *
+ * Usage: ./filecopy <ext2_image_name> <source_file> <target_path>
+ *
+ *  OR
+ *        ./filecopy <ext2_image_name> <source_file> <target_inode>
+ *
+ *  MIT (c) 2019 Yavuz Selim Yesilyurt
+ */
 
 #define BASE_OFFSET 1024
 #define FOURK_OFFSET 2048
